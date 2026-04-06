@@ -1,43 +1,79 @@
-name: Trim Audio
+name: Trim Audio + SRT
 
 on:
   workflow_dispatch:
     inputs:
       mp3_url:
+        description: "Source MP3 URL"
         required: true
       output_name:
+        description: "Base output filename"
         required: true
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - name: Install FFmpeg
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg + Python
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg python3 python3-pip
+
+      - name: Install Whisper
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install openai-whisper
 
       - name: Download MP3
         run: |
           curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
-          echo "File info:"
-          file input.mp3
-          ls -lh input.mp3
+          echo "===== FILE INFO ====="
+          file input.mp3 || true
+          ls -lh input.mp3 || true
 
       - name: Validate MP3
         run: |
-          if ! file input.mp3 | grep -q "Audio"; then
+          if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
             echo "Invalid MP3 file"
             exit 1
           fi
 
+      # More reliable than -c copy for weird web MP3s
       - name: Remove first 5 sec
         run: |
-          ffmpeg -i input.mp3 -ss 00:00:05 -c copy output.mp3
+          ffmpeg -y -ss 00:00:05 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+
+      - name: Generate SRT from trimmed MP3
+        run: |
+          whisper output.mp3 \
+            --model base \
+            --task transcribe \
+            --language en \
+            --output_format srt \
+            --output_dir .
+
+      - name: Rename SRT nicely
+        run: |
+          if [ -f "output.srt" ]; then
+            mv output.srt transcript.srt
+          fi
+
+      - name: Verify outputs
+        run: |
+          echo "===== OUTPUT FILES ====="
+          ls -lh
+          test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
+          test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: trimmed
-          path: output.mp3
+          path: |
+            output.mp3
+            transcript.srt
