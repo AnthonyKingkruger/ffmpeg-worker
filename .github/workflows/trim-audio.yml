@@ -1,0 +1,30 @@
+name: Trim Audio
+
+on:
+  workflow_dispatch:
+    inputs:
+      mp3_url:
+        required: true
+      output_name:
+        required: true
+      trim_start:
+        required: true
+      trim_end:
+        required: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: ffmpeg -version
+
+      - run: curl -L "${{ github.event.inputs.mp3_url }}" -o input.mp3
+
+      - run: |
+          ffmpeg -i input.mp3 -ss "${{ github.event.inputs.trim_start }}" -to "${{ github.event.inputs.trim_end }}" -c copy output.mp3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trimmed
+          path: output.mp3
