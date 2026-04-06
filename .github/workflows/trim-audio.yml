@@ -1,13 +1,14 @@
-name: Trim Audio + SRT (FREE Whisper)
+name: Trim Audio + SRT
 
 on:
   workflow_dispatch:
     inputs:
       mp3_url:
+        description: "Source MP3 URL"
         required: true
       output_name:
+        description: "Base output filename"
         required: true
-
 jobs:
   run:
     runs-on: ubuntu-latest
