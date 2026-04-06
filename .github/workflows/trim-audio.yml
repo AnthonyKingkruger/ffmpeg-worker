@@ -17,14 +17,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - run: ffmpeg -version
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - run: curl -L "${{ github.event.inputs.mp3_url }}" -o input.mp3
+      - name: Check FFmpeg
+        run: ffmpeg -version
 
-      - run: |
+      - name: Download MP3
+        run: |
+          curl -L -o input.mp3 "${{ github.event.inputs.mp3_url }}"
+          echo "Downloaded file info:"
+          file input.mp3
+          ls -lh input.mp3
+
+      - name: Trim MP3
+        run: |
           ffmpeg -i input.mp3 -ss "${{ github.event.inputs.trim_start }}" -to "${{ github.event.inputs.trim_end }}" -c copy output.mp3
 
-      - uses: actions/upload-artifact@v4
+      - name: Show output
+        run: |
+          file output.mp3
+          ls -lh output.mp3
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: trimmed
           path: output.mp3
