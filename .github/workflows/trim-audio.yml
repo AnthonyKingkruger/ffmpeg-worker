@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       mp3_url:
+        description: "Direct MP3 URL"
         required: true
       output_name:
+        description: "Output file name"
         required: true
       trim_start:
+        description: "Trim start"
         required: true
       trim_end:
+        description: "Trim end"
         required: true
 
 jobs:
