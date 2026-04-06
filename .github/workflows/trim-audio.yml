@@ -13,16 +13,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - run: |
+      - name: Download MP3
+        run: |
           curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
+          echo "File info:"
           file input.mp3
+          ls -lh input.mp3
 
-      - run: |
+      - name: Validate MP3
+        run: |
+          if ! file input.mp3 | grep -q "Audio"; then
+            echo "Invalid MP3 file"
+            exit 1
+          fi
+
+      - name: Remove first 5 sec
+        run: |
           ffmpeg -i input.mp3 -ss 00:00:05 -c copy output.mp3
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: trimmed
           path: output.mp3
