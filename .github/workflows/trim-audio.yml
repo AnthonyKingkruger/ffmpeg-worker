@@ -1,13 +1,11 @@
-name: Trim Audio + SRT
+name: Trim Audio + SRT (FREE Whisper)
 
 on:
   workflow_dispatch:
     inputs:
       mp3_url:
-        description: "Source MP3 URL"
         required: true
       output_name:
-        description: "Base output filename"
         required: true
 
 jobs:
@@ -15,48 +13,57 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: ghcr.io/anthonykingkruger/ffmpeg-whisper:latest
+      image: ghcr.io/YOUR_USERNAME/ffmpeg-whisper:latest
 
     steps:
       - name: Download MP3
         run: |
-          curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
-          echo "===== FILE INFO ====="
-          file input.mp3 || true
-          ls -lh input.mp3 || true
+          curl -L -o input.mp3 "${{ github.event.inputs.mp3_url }}"
+          file input.mp3
 
-      - name: Validate MP3
+      - name: Trim first 5.5 sec
         run: |
-          if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
-            echo "Invalid MP3 file"
-            exit 1
-          fi
+          ffmpeg -y -ss 00:00:05.5 -i input.mp3 -acodec libmp3lame output.mp3
 
-      - name: Remove first 5 sec
+      - name: Generate SRT (FREE Whisper)
         run: |
-          ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          python3 - <<EOF
+from faster_whisper import WhisperModel
 
-      - name: Generate SRT from trimmed MP3
-        run: |
-          whisper output.mp3 \
-            --model base \
-            --task transcribe \
-            --language en \
-            --output_format srt \
-            --output_dir .
+model = WhisperModel("base", compute_type="int8")
 
-      - name: Rename SRT nicely
-        run: |
-          if [ -f "output.srt" ]; then
-            mv output.srt transcript.srt
-          fi
+segments, info = model.transcribe("output.mp3")
 
-      - name: Verify outputs
+with open("transcript.srt", "w", encoding="utf-8") as f:
+    for i, seg in enumerate(segments, 1):
+        start = seg.start
+        end = seg.end
+
+        def format_time(t):
+            h = int(t // 3600)
+            m = int((t % 3600) // 60)
+            s = int(t % 60)
+            ms = int((t - int(t)) * 1000)
+            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+        f.write(f"{i}\n")
+        f.write(f"{format_time(start)} --> {format_time(end)}\n")
+        f.write(seg.text.strip() + "\n\n")
+EOF
+
+      - name: Generate TXT
         run: |
-          echo "===== OUTPUT FILES ====="
-          ls -lh
-          test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
-          test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
+          python3 - <<EOF
+from faster_whisper import WhisperModel
+
+model = WhisperModel("base", compute_type="int8")
+
+segments, _ = model.transcribe("output.mp3")
+
+with open("transcript.txt", "w", encoding="utf-8") as f:
+    for seg in segments:
+        f.write(seg.text.strip() + " ")
+EOF
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -65,3 +72,4 @@ jobs:
           path: |
             output.mp3
             transcript.srt
+            transcript.txt
