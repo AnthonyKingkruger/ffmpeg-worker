@@ -1,4 +1,4 @@
-name: Trim Audio + SRT
+name: Trim Audio + SRT + TXT + Voice
 
 on:
   workflow_dispatch:
@@ -27,8 +27,8 @@ jobs:
 
       - name: Validate MP3
         run: |
-          if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
-            echo "Invalid MP3 file"
+          if [ ! -s input.mp3 ]; then
+            echo "Invalid or empty MP3 file"
             exit 1
           fi
 
@@ -51,12 +51,46 @@ jobs:
             mv output.srt transcript.srt
           fi
 
+      - name: Create clean TXT from SRT
+        run: |
+          python3 - << 'PY'
+          import re
+
+          with open("transcript.srt", "r", encoding="utf-8") as f:
+              srt = f.read()
+
+          lines = []
+          for line in srt.splitlines():
+              line = line.strip()
+              if not line:
+                  continue
+              if re.match(r'^\d+$', line):
+                  continue
+              if '-->' in line:
+                  continue
+              lines.append(line)
+
+          text = ' '.join(lines)
+          text = re.sub(r'\s+', ' ', text).strip()
+
+          with open("transcript.txt", "w", encoding="utf-8") as f:
+              f.write(text)
+          PY
+
+      - name: Generate AI Voice MP3 from TXT
+        run: |
+          TEXT=$(cat transcript.txt)
+          espeak-ng -v en-us -s 160 -w ai_voice.wav "$TEXT"
+          ffmpeg -y -i ai_voice.wav -codec:a libmp3lame -q:a 2 ai_voice.mp3
+
       - name: Verify outputs
         run: |
           echo "===== OUTPUT FILES ====="
           ls -lh
           test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
           test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
+          test -f transcript.txt || (echo "transcript.txt missing" && exit 1)
+          test -f ai_voice.mp3 || (echo "ai_voice.mp3 missing" && exit 1)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -65,3 +99,5 @@ jobs:
           path: |
             output.mp3
             transcript.srt
+            transcript.txt
+            ai_voice.mp3
