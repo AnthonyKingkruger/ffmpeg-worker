@@ -34,7 +34,7 @@ jobs:
 
       - name: Remove first 5 sec
         run: |
-          ffmpeg -y -ss 00:00:05 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          ffmpeg -y -i input.mp3 -ss 5.5 -vn -acodec libmp3lame -q:a 2 output.mp3
 
       - name: Generate SRT from trimmed MP3
         run: |
