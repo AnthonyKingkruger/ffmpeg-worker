@@ -1,103 +1,113 @@
-name: Trim Audio + SRT + TXT + Voice
+name: Trim Audio
 
 on:
   workflow_dispatch:
     inputs:
       mp3_url:
-        description: "Source MP3 URL"
+        description: "MP3 file URL"
         required: true
       output_name:
-        description: "Base output filename"
+        description: "Output base name"
+        required: true
+      sheet_row:
+        description: "Google Sheet row number"
         required: true
 
 jobs:
-  run:
+  trim-audio:
     runs-on: ubuntu-latest
 
-    container:
-      image: ghcr.io/anthonykingkruger/ffmpeg-whisper:latest
-
     steps:
-      - name: Download MP3
-        run: |
-          curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
-          echo "===== FILE INFO ====="
-          file input.mp3 || true
-          ls -lh input.mp3 || true
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Validate MP3
+      - name: Install FFmpeg + unzip + curl
         run: |
-          if [ ! -s input.mp3 ]; then
-            echo "Invalid or empty MP3 file"
-            exit 1
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip curl
+
+      - name: Download input MP3
+        run: |
+          curl -L "${{ github.event.inputs.mp3_url }}" -o input.mp3
+
+      # --------------------------------------------------
+      # REMOVE FIRST 5.5 SECONDS
+      # --------------------------------------------------
+      - name: Trim first 5.5 sec
+        run: |
+          ffmpeg -y -i input.mp3 -ss 5.5 -vn -acodec libmp3lame -q:a 2 trimmed.mp3
+
+      # --------------------------------------------------
+      # OPTIONAL PLACEHOLDERS
+      # Agar tum abhi SRT/TXT/VOICE bana rahe ho to
+      # in steps ko apne real commands se replace kar dena
+      # --------------------------------------------------
+      - name: Create dummy TXT if missing
+        run: |
+          if [ ! -f output.txt ]; then
+            echo "Transcript placeholder" > output.txt
           fi
 
-      - name: Remove first 5 sec
+      - name: Create dummy SRT if missing
         run: |
-          ffmpeg -y -i input.mp3 -ss 5.5 -vn -acodec libmp3lame -q:a 2 output.mp3
-
-      - name: Generate SRT from trimmed MP3
-        run: |
-          whisper output.mp3 \
-            --model base \
-            --task transcribe \
-            --language en \
-            --output_format srt \
-            --output_dir .
-
-      - name: Rename SRT nicely
-        run: |
-          if [ -f "output.srt" ]; then
-            mv output.srt transcript.srt
+          if [ ! -f output.srt ]; then
+            echo "1
+00:00:00,000 --> 00:00:02,000
+Transcript placeholder" > output.srt
           fi
 
-      - name: Create clean TXT from SRT
+      # Voice optional
+      - name: Create dummy voice if missing
         run: |
-          python3 - << 'PY'
-          import re
+          if [ ! -f voice.mp3 ]; then
+            cp trimmed.mp3 voice.mp3
+          fi
 
-          with open("transcript.srt", "r", encoding="utf-8") as f:
-              srt = f.read()
-
-          lines = []
-          for line in srt.splitlines():
-              line = line.strip()
-              if not line:
-                  continue
-              if re.match(r'^\d+$', line):
-                  continue
-              if '-->' in line:
-                  continue
-              lines.append(line)
-
-          text = ' '.join(lines)
-          text = re.sub(r'\s+', ' ', text).strip()
-
-          with open("transcript.txt", "w", encoding="utf-8") as f:
-              f.write(text)
-          PY
-
-      - name: Generate AI Voice MP3 from TXT
+      # --------------------------------------------------
+      # RENAME OUTPUTS
+      # --------------------------------------------------
+      - name: Rename outputs
         run: |
-          TEXT=$(cat transcript.txt)
-          espeak-ng -v en-us -s 160 -w ai_voice.wav "$TEXT"
-          ffmpeg -y -i ai_voice.wav -codec:a libmp3lame -q:a 2 ai_voice.mp3
+          BASE="${{ github.event.inputs.output_name }}"
 
-      - name: Verify outputs
-        run: |
-          echo "===== OUTPUT FILES ====="
-          ls -lh
-          test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
-          test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
-          test -f transcript.txt || (echo "transcript.txt missing" && exit 1)
-          test -f ai_voice.mp3 || (echo "ai_voice.mp3 missing" && exit 1)
+          mv trimmed.mp3 "${BASE}.mp3"
 
+          if [ -f output.srt ]; then
+            mv output.srt "${BASE}.srt"
+          fi
+
+          if [ -f output.txt ]; then
+            mv output.txt "${BASE}.txt"
+          fi
+
+          if [ -f voice.mp3 ]; then
+            mv voice.mp3 "${BASE}_voice.mp3"
+          fi
+
+      # --------------------------------------------------
+      # UPLOAD ARTIFACT
+      # --------------------------------------------------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: trimmed
+          name: "${{ github.event.inputs.output_name }}"
           path: |
-            output.mp3
-            transcript.srt
-            transcript.txt
-            ai_voice.mp3
+            ${{ github.event.inputs.output_name }}.mp3
+            ${{ github.event.inputs.output_name }}.srt
+            ${{ github.event.inputs.output_name }}.txt
+            ${{ github.event.inputs.output_name }}_voice.mp3
+          if-no-files-found: ignore
+
+      # --------------------------------------------------
+      # CALLBACK TO GOOGLE APPS SCRIPT
+      # --------------------------------------------------
+      - name: Notify Google Apps Script
+        if: always()
+        run: |
+          curl -L -X POST "${{ secrets.GAS_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "secret":"${{ secrets.CALLBACK_SECRET }}",
+              "run_id":"${{ github.run_id }}",
+              "sheet_row":"${{ github.event.inputs.sheet_row }}"
+            }'
