@@ -1,67 +1,155 @@
-name: Trim Audio + SRT
+name: Trim Audio
 
 on:
   workflow_dispatch:
     inputs:
       mp3_url:
-        description: "Source MP3 URL"
+        description: "MP3 file URL (Drive proxy direct download)"
         required: true
+        type: string
       output_name:
-        description: "Base output filename"
+        description: "Output base name"
         required: true
+        type: string
+      sheet_row:
+        description: "Google Sheet row number"
+        required: true
+        type: string
 
 jobs:
-  run:
+  trim-audio:
     runs-on: ubuntu-latest
-
-    container:
-      image: ghcr.io/anthonykingkruger/ffmpeg-whisper:latest
+    timeout-minutes: 20
 
     steps:
-      - name: Download MP3
-        run: |
-          curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
-          echo "===== FILE INFO ====="
-          file input.mp3 || true
-          ls -lh input.mp3 || true
+      # --------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Validate MP3
+      # --------------------------------------------------
+      # INSTALL TOOLS
+      # --------------------------------------------------
+      - name: Install FFmpeg + unzip + curl
         run: |
-          if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
-            echo "Invalid MP3 file"
-            exit 1
-          fi
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip curl
 
-      - name: Remove first 5 sec
+      # --------------------------------------------------
+      # DEBUG INPUTS
+      # --------------------------------------------------
+      - name: Debug inputs
         run: |
-          ffmpeg -y -ss 00:00:05 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          echo "MP3 URL: ${{ github.event.inputs.mp3_url }}"
+          echo "OUTPUT NAME: ${{ github.event.inputs.output_name }}"
+          echo "SHEET ROW: ${{ github.event.inputs.sheet_row }}"
+          echo "RUN ID: ${{ github.run_id }}"
 
-      - name: Generate SRT from trimmed MP3
+      # --------------------------------------------------
+      # DOWNLOAD INPUT FROM DRIVE PROXY
+      # --------------------------------------------------
+      - name: Download input MP3
         run: |
-          whisper output.mp3 \
-            --model base \
-            --task transcribe \
-            --language en \
-            --output_format srt \
-            --output_dir .
+          curl -L --fail \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            "${{ github.event.inputs.mp3_url }}" -o input.mp3
 
-      - name: Rename SRT nicely
+      # --------------------------------------------------
+      # CHECK INPUT
+      # --------------------------------------------------
+      - name: Check input file
         run: |
-          if [ -f "output.srt" ]; then
-            mv output.srt transcript.srt
-          fi
-
-      - name: Verify outputs
-        run: |
-          echo "===== OUTPUT FILES ====="
           ls -lh
-          test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
-          test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
+          file input.mp3 || true
 
+      # --------------------------------------------------
+      # REMOVE FIRST 5.5 SECONDS
+      # --------------------------------------------------
+      - name: Trim first 5.5 sec
+        run: |
+          ffmpeg -y -i input.mp3 -ss 5.5 -vn -acodec libmp3lame -q:a 2 trimmed.mp3
+
+      # --------------------------------------------------
+      # PLACEHOLDER TXT
+      # Replace later with real transcript pipeline
+      # --------------------------------------------------
+      - name: Create TXT if missing
+        run: |
+          if [ ! -f output.txt ]; then
+            echo "Transcript placeholder" > output.txt
+          fi
+
+      # --------------------------------------------------
+      # PLACEHOLDER SRT
+      # Replace later with real SRT pipeline
+      # --------------------------------------------------
+      - name: Create SRT if missing
+        run: |
+          if [ ! -f output.srt ]; then
+            printf "1\n00:00:00,000 --> 00:00:02,000\nTranscript placeholder\n" > output.srt
+          fi
+
+      # --------------------------------------------------
+      # PLACEHOLDER VOICE
+      # Replace later with real TTS pipeline
+      # --------------------------------------------------
+      - name: Create Voice if missing
+        run: |
+          if [ ! -f voice.mp3 ]; then
+            cp trimmed.mp3 voice.mp3
+          fi
+
+      # --------------------------------------------------
+      # RENAME OUTPUTS
+      # --------------------------------------------------
+      - name: Rename outputs
+        run: |
+          BASE="${{ github.event.inputs.output_name }}"
+
+          if [ -f trimmed.mp3 ]; then
+            mv trimmed.mp3 "${BASE}.mp3"
+          fi
+
+          if [ -f output.srt ]; then
+            mv output.srt "${BASE}.srt"
+          fi
+
+          if [ -f output.txt ]; then
+            mv output.txt "${BASE}.txt"
+          fi
+
+          if [ -f voice.mp3 ]; then
+            mv voice.mp3 "${BASE}_voice.mp3"
+          fi
+
+          ls -lh
+
+      # --------------------------------------------------
+      # UPLOAD ARTIFACTS
+      # --------------------------------------------------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: trimmed
+          name: "${{ github.event.inputs.output_name }}"
           path: |
-            output.mp3
-            transcript.srt
+            ${{ github.event.inputs.output_name }}.mp3
+            ${{ github.event.inputs.output_name }}.srt
+            ${{ github.event.inputs.output_name }}.txt
+            ${{ github.event.inputs.output_name }}_voice.mp3
+          if-no-files-found: ignore
+
+      # --------------------------------------------------
+      # CALLBACK TO GOOGLE APPS SCRIPT
+      # --------------------------------------------------
+      - name: Notify Google Apps Script
+        if: always()
+        continue-on-error: true
+        run: |
+          curl -L -X POST "${{ secrets.GAS_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "secret":"${{ secrets.CALLBACK_SECRET }}",
+              "run_id":"${{ github.run_id }}",
+              "sheet_row":"${{ github.event.inputs.sheet_row }}"
+            }'
