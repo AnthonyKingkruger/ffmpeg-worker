@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     file \
+    espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir openai-whisper
