@@ -6,71 +6,101 @@ on:
       mp3_url:
         description: "MP3 file URL"
         required: true
+        type: string
       output_name:
         description: "Output base name"
         required: true
+        type: string
       sheet_row:
         description: "Google Sheet row number"
         required: true
+        type: string
 
 jobs:
   trim-audio:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
+      # --------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # INSTALL TOOLS
+      # --------------------------------------------------
       - name: Install FFmpeg + unzip + curl
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg unzip curl
 
+      # --------------------------------------------------
+      # SHOW INPUTS (DEBUG)
+      # --------------------------------------------------
+      - name: Debug inputs
+        run: |
+          echo "MP3 URL: ${{ github.event.inputs.mp3_url }}"
+          echo "OUTPUT NAME: ${{ github.event.inputs.output_name }}"
+          echo "SHEET ROW: ${{ github.event.inputs.sheet_row }}"
+          echo "RUN ID: ${{ github.run_id }}"
+
+      # --------------------------------------------------
+      # DOWNLOAD INPUT AUDIO
+      # --------------------------------------------------
       - name: Download input MP3
         run: |
-          curl -L "${{ github.event.inputs.mp3_url }}" -o input.mp3
+          curl -L --fail "${{ github.event.inputs.mp3_url }}" -o input.mp3
+
+      # --------------------------------------------------
+      # OPTIONAL CHECK
+      # --------------------------------------------------
+      - name: Check input file
+        run: |
+          ls -lh
+          file input.mp3 || true
 
       # --------------------------------------------------
       # REMOVE FIRST 5.5 SECONDS
+      # More accurate trim (recommended)
       # --------------------------------------------------
       - name: Trim first 5.5 sec
         run: |
           ffmpeg -y -i input.mp3 -ss 5.5 -vn -acodec libmp3lame -q:a 2 trimmed.mp3
 
       # --------------------------------------------------
-      # OPTIONAL PLACEHOLDERS
-      # Agar tum abhi SRT/TXT/VOICE bana rahe ho to
-      # in steps ko apne real commands se replace kar dena
+      # OPTIONAL PLACEHOLDER FILES
+      # Replace later with your real STT / SRT / voice pipeline
       # --------------------------------------------------
-      - name: Create dummy TXT if missing
+      - name: Create TXT if missing
         run: |
           if [ ! -f output.txt ]; then
             echo "Transcript placeholder" > output.txt
           fi
 
-      - name: Create dummy SRT if missing
+      - name: Create SRT if missing
         run: |
           if [ ! -f output.srt ]; then
-            echo "1
-00:00:00,000 --> 00:00:02,000
-Transcript placeholder" > output.srt
+            printf "1\n00:00:00,000 --> 00:00:02,000\nTranscript placeholder\n" > output.srt
           fi
 
-      # Voice optional
-      - name: Create dummy voice if missing
+      - name: Create Voice if missing
         run: |
           if [ ! -f voice.mp3 ]; then
             cp trimmed.mp3 voice.mp3
           fi
 
       # --------------------------------------------------
-      # RENAME OUTPUTS
+      # RENAME OUTPUTS CLEANLY
       # --------------------------------------------------
       - name: Rename outputs
         run: |
           BASE="${{ github.event.inputs.output_name }}"
 
-          mv trimmed.mp3 "${BASE}.mp3"
+          if [ -f trimmed.mp3 ]; then
+            mv trimmed.mp3 "${BASE}.mp3"
+          fi
 
           if [ -f output.srt ]; then
             mv output.srt "${BASE}.srt"
@@ -84,8 +114,10 @@ Transcript placeholder" > output.srt
             mv voice.mp3 "${BASE}_voice.mp3"
           fi
 
+          ls -lh
+
       # --------------------------------------------------
-      # UPLOAD ARTIFACT
+      # UPLOAD ARTIFACTS
       # --------------------------------------------------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -100,9 +132,11 @@ Transcript placeholder" > output.srt
 
       # --------------------------------------------------
       # CALLBACK TO GOOGLE APPS SCRIPT
+      # Runs even if earlier step fails
       # --------------------------------------------------
       - name: Notify Google Apps Script
         if: always()
+        continue-on-error: true
         run: |
           curl -L -X POST "${{ secrets.GAS_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
