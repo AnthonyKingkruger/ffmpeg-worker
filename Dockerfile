@@ -12,6 +12,6 @@ RUN apt-get update && apt-get install -y \
     espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir openai-whisper
+RUN pip3 install --no-cache-dir openai-whisper edge-tts
 
 WORKDIR /app
