@@ -3,14 +3,9 @@ name: Trim Audio
 on:
   workflow_dispatch:
     inputs:
-      audio_base64:
-        description: "Base64 encoded MP3"
+      mp3_url:
         required: true
       output_name:
-        description: "Output file name"
-        required: true
-      remove_first_5:
-        description: "true = remove first 5 sec, false = keep only first 5 sec"
         required: true
 
 jobs:
@@ -23,27 +18,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Decode MP3
+      - name: Download MP3
         run: |
-          echo "${{ github.event.inputs.audio_base64 }}" | base64 -d > input.mp3
-          echo "Input file info:"
+          curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
+          echo "File info:"
           file input.mp3
           ls -lh input.mp3
 
-      - name: Trim Audio
+      - name: Validate MP3
         run: |
-          if [ "${{ github.event.inputs.remove_first_5 }}" = "true" ]; then
-            echo "Removing first 5 seconds..."
-            ffmpeg -i input.mp3 -ss 00:00:05 -c copy output.mp3
-          else
-            echo "Keeping only first 5 seconds..."
-            ffmpeg -i input.mp3 -ss 00:00:00 -to 00:00:05 -c copy output.mp3
+          if ! file input.mp3 | grep -q "Audio"; then
+            echo "Invalid MP3 file"
+            exit 1
           fi
 
-      - name: Show output
+      - name: Remove first 5 sec
         run: |
-          file output.mp3
-          ls -lh output.mp3
+          ffmpeg -i input.mp3 -ss 00:00:05 -c copy output.mp3
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
