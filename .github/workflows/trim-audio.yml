@@ -118,27 +118,26 @@ jobs:
               raise SystemExit("transcript_raw.srt not found")
 
           raw = inp.read_text(encoding="utf-8", errors="ignore").replace("\r", "")
-
           blocks = re.split(r"\n\s*\n", raw.strip())
 
           def clean_text(t):
               t = t.replace("\n", " ").strip()
               t = re.sub(r"\s+", " ", t)
-
-              # remove weird spaces before punctuation
               t = re.sub(r"\s+([,.!?;:])", r"\1", t)
-
-              # optional light cleanup of obvious whisper oddities
               t = t.replace(" ,", ",").replace(" .", ".")
               return t.strip()
 
           def wrap_two_lines(text, width=34):
-              wrapped = textwrap.wrap(text, width=width, break_long_words=False, break_on_hyphens=False)
+              wrapped = textwrap.wrap(
+                  text,
+                  width=width,
+                  break_long_words=False,
+                  break_on_hyphens=False
+              )
 
               if len(wrapped) <= 2:
                   return "\n".join(wrapped)
 
-              # If more than 2 lines, merge smartly into 2 balanced lines
               words = text.split()
               best = None
 
@@ -153,7 +152,6 @@ jobs:
               if best:
                   return best[1] + "\n" + best[2]
 
-              # fallback hard split
               mid = len(words) // 2
               return " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
 
@@ -172,7 +170,6 @@ jobs:
                   continue
 
               text = wrap_two_lines(text, width=34)
-
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
 
@@ -183,7 +180,7 @@ jobs:
           echo "===== transcript.srt preview ====="
           head -n 60 transcript.srt || true
 
-      - name: Convert polished SRT to ASS with fixed news-card position
+      - name: Convert polished SRT to ASS with fixed bottom-right position
         run: |
           set -e
 
@@ -205,7 +202,7 @@ jobs:
               elif line.startswith("PlayResY:"):
                   out.append("PlayResY: 1080")
               elif line.startswith("Style: Default") and not style_replaced:
-                  out.append("Style: Default,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,9,1090,95,105")
+                  out.append("Style: Default,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,3,95,95,115")
                   style_replaced = True
               else:
                   out.append(line)
@@ -224,11 +221,11 @@ jobs:
           echo "duration=$D" >> $GITHUB_OUTPUT
           echo "Detected duration: $D"
 
-      - name: Create Video (1920x1080 + Polished News Subtitle Card)
+      - name: Create Video (1920x1080 + Perfect Bottom Right News Subtitle Card)
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1025:y=715:w=835:h=255:color=black@0.42:t=fill,drawbox=x=1025:y=715:w=835:h=255:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1010:y=720:w=850:h=250:color=black@0.42:t=fill,drawbox=x=1010:y=720:w=850:h=250:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           echo "Using filter:"
           echo "$FILTER"
