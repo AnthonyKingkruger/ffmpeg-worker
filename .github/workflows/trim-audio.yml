@@ -127,7 +127,7 @@ jobs:
               t = t.replace(" ,", ",").replace(" .", ".")
               return t.strip()
 
-          def wrap_two_lines(text, width=34):
+          def wrap_two_lines(text, width=32):
               wrapped = textwrap.wrap(
                   text,
                   width=width,
@@ -145,7 +145,7 @@ jobs:
                   l1 = " ".join(words[:i])
                   l2 = " ".join(words[i:])
                   score = abs(len(l1) - len(l2))
-                  if len(l1) <= 42 and len(l2) <= 42:
+                  if len(l1) <= 38 and len(l2) <= 38:
                       if best is None or score < best[0]:
                           best = (score, l1, l2)
 
@@ -169,7 +169,7 @@ jobs:
               if not text:
                   continue
 
-              text = wrap_two_lines(text, width=34)
+              text = wrap_two_lines(text, width=32)
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
 
@@ -180,7 +180,7 @@ jobs:
           echo "===== transcript.srt preview ====="
           head -n 60 transcript.srt || true
 
-      - name: Convert polished SRT to ASS with fixed bottom-right position
+      - name: Convert polished SRT to ASS with centered subtitle card text
         run: |
           set -e
 
@@ -202,7 +202,7 @@ jobs:
               elif line.startswith("PlayResY:"):
                   out.append("PlayResY: 1080")
               elif line.startswith("Style: Default") and not style_replaced:
-                  out.append("Style: Default,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,3,95,95,115")
+                  out.append("Style: Default,DejaVu Sans,28,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,2,0,0,120")
                   style_replaced = True
               else:
                   out.append(line)
@@ -221,11 +221,11 @@ jobs:
           echo "duration=$D" >> $GITHUB_OUTPUT
           echo "Detected duration: $D"
 
-      - name: Create Video (1920x1080 + Perfect Bottom Right News Subtitle Card)
+      - name: Create Video (1920x1080 + Centered News Subtitle Card)
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1010:y=720:w=850:h=250:color=black@0.42:t=fill,drawbox=x=1010:y=720:w=850:h=250:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=980:y=705:w=880:h=270:color=black@0.42:t=fill,drawbox=x=980:y=705:w=880:h=270:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           echo "Using filter:"
           echo "$FILTER"
