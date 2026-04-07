@@ -96,22 +96,125 @@ jobs:
       - name: Rename Outputs
         run: |
           set -e
-          [ -f output.srt ] && mv output.srt transcript.srt || true
+          [ -f output.srt ] && mv output.srt transcript_raw.srt || true
           [ -f output.txt ] && mv output.txt transcript.txt || true
           [ -f output.vtt ] && mv output.vtt transcript.vtt || true
           [ -f output.json ] && mv output.json transcript.json || true
-
           ls -lh || true
 
-      - name: Fix SRT
+      - name: Clean + Rewrap SRT (max 2 lines, polished)
         run: |
           set -e
-          sed -i 's/\r$//' transcript.srt || true
 
-          if [ ! -f transcript.srt ]; then
-            echo "transcript.srt not found"
-            exit 1
-          fi
+          python3 << 'PY'
+          import re
+          import textwrap
+          from pathlib import Path
+
+          inp = Path("transcript_raw.srt")
+          outp = Path("transcript.srt")
+
+          if not inp.exists():
+              raise SystemExit("transcript_raw.srt not found")
+
+          raw = inp.read_text(encoding="utf-8", errors="ignore").replace("\r", "")
+
+          blocks = re.split(r"\n\s*\n", raw.strip())
+
+          def clean_text(t):
+              t = t.replace("\n", " ").strip()
+              t = re.sub(r"\s+", " ", t)
+
+              # remove weird spaces before punctuation
+              t = re.sub(r"\s+([,.!?;:])", r"\1", t)
+
+              # optional light cleanup of obvious whisper oddities
+              t = t.replace(" ,", ",").replace(" .", ".")
+              return t.strip()
+
+          def wrap_two_lines(text, width=34):
+              wrapped = textwrap.wrap(text, width=width, break_long_words=False, break_on_hyphens=False)
+
+              if len(wrapped) <= 2:
+                  return "\n".join(wrapped)
+
+              # If more than 2 lines, merge smartly into 2 balanced lines
+              words = text.split()
+              best = None
+
+              for i in range(1, len(words)):
+                  l1 = " ".join(words[:i])
+                  l2 = " ".join(words[i:])
+                  score = abs(len(l1) - len(l2))
+                  if len(l1) <= 42 and len(l2) <= 42:
+                      if best is None or score < best[0]:
+                          best = (score, l1, l2)
+
+              if best:
+                  return best[1] + "\n" + best[2]
+
+              # fallback hard split
+              mid = len(words) // 2
+              return " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
+
+          new_blocks = []
+          idx = 1
+
+          for block in blocks:
+              lines = [x for x in block.strip().split("\n") if x.strip()]
+              if len(lines) < 3:
+                  continue
+
+              time_line = lines[1].strip()
+              text = clean_text(" ".join(lines[2:]))
+
+              if not text:
+                  continue
+
+              text = wrap_two_lines(text, width=34)
+
+              new_blocks.append(f"{idx}\n{time_line}\n{text}")
+              idx += 1
+
+          outp.write_text("\n\n".join(new_blocks) + "\n", encoding="utf-8")
+          print("Cleaned transcript.srt written successfully")
+          PY
+
+          echo "===== transcript.srt preview ====="
+          head -n 60 transcript.srt || true
+
+      - name: Convert polished SRT to ASS with fixed news-card position
+        run: |
+          set -e
+
+          ffmpeg -y -i transcript.srt transcript.ass
+
+          python3 << 'PY'
+          from pathlib import Path
+
+          p = Path("transcript.ass")
+          text = p.read_text(encoding="utf-8", errors="ignore")
+          lines = text.splitlines()
+          out = []
+
+          style_replaced = False
+
+          for line in lines:
+              if line.startswith("PlayResX:"):
+                  out.append("PlayResX: 1920")
+              elif line.startswith("PlayResY:"):
+                  out.append("PlayResY: 1080")
+              elif line.startswith("Style: Default") and not style_replaced:
+                  out.append("Style: Default,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,9,1090,95,105")
+                  style_replaced = True
+              else:
+                  out.append(line)
+
+          p.write_text("\n".join(out), encoding="utf-8")
+          PY
+
+          echo "===== transcript.ass preview ====="
+          head -n 50 transcript.ass || true
 
       - name: Get Duration
         id: duration
@@ -121,11 +224,11 @@ jobs:
           echo "duration=$D" >> $GITHUB_OUTPUT
           echo "Detected duration: $D"
 
-      - name: Create Video (1920x1080 + Visible Subtitle Box)
+      - name: Create Video (1920x1080 + Polished News Subtitle Card)
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=920:y=760:w=900:h=220:color=black@0.45:t=fill[subbg];[subbg]subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=18,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=140'"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1025:y=715:w=835:h=255:color=black@0.42:t=fill,drawbox=x=1025:y=715:w=835:h=255:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           echo "Using filter:"
           echo "$FILTER"
@@ -154,6 +257,7 @@ jobs:
           ls -lh
           test -f output.mp3
           test -f transcript.srt
+          test -f transcript.ass
           test -f transcript.txt
           test -f final_video.mp4
 
@@ -163,7 +267,9 @@ jobs:
           name: trimmed
           path: |
             output.mp3
+            transcript_raw.srt
             transcript.srt
+            transcript.ass
             transcript.txt
             transcript.vtt
             transcript.json
