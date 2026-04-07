@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     file \
     ca-certificates \
+    fonts-dejavu-core \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --upgrade pip setuptools wheel
