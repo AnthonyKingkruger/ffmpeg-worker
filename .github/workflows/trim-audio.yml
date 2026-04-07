@@ -1,10 +1,14 @@
-name: Trim Audio + SRT
+name: Trim Audio + SRT + Final Video
 
 on:
   workflow_dispatch:
     inputs:
       mp3_url:
         description: "Source MP3 URL"
+        required: true
+        type: string
+      image_url:
+        description: "Final image URL"
         required: true
         type: string
       output_name:
@@ -23,6 +27,7 @@ jobs:
       - name: Show inputs
         run: |
           echo "MP3 URL: ${{ github.event.inputs.mp3_url }}"
+          echo "IMAGE URL: ${{ github.event.inputs.image_url }}"
           echo "Output Name: ${{ github.event.inputs.output_name }}"
 
       - name: Download MP3
@@ -32,12 +37,40 @@ jobs:
           file input.mp3 || true
           ls -lh input.mp3 || true
 
+      - name: Download Final Image
+        run: |
+          curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
+          echo "===== IMAGE INFO ====="
+          file input_image || true
+          ls -lh input_image || true
+
       - name: Validate MP3
         run: |
           if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
             echo "Invalid MP3 file"
             exit 1
           fi
+
+      - name: Normalize Image
+        run: |
+          set -e
+
+          if file input_image | grep -qi 'PNG'; then
+            mv input_image image.png
+            ffmpeg -y -i image.png -q:v 2 bg.jpg
+          elif file input_image | grep -qi 'JPEG'; then
+            mv input_image image.jpg
+            cp image.jpg bg.jpg
+          elif file input_image | grep -qi 'Web/P'; then
+            mv input_image image.webp
+            ffmpeg -y -i image.webp -q:v 2 bg.jpg
+          else
+            echo "Unknown image type, trying as jpg"
+            mv input_image image.jpg
+            cp image.jpg bg.jpg
+          fi
+
+          ls -lh
 
       - name: Remove first 5.5 sec
         run: |
@@ -66,12 +99,39 @@ jobs:
           if [ -f "output.vtt" ]; then mv output.vtt transcript.vtt; fi
           if [ -f "output.json" ]; then mv output.json transcript.json; fi
 
+      - name: Fix subtitle line endings
+        run: |
+          sed -i 's/\r$//' transcript.srt || true
+
+      - name: Get trimmed audio duration
+        id: duration
+        run: |
+          DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo "Trimmed Audio Duration: $DURATION"
+
+      - name: Create Final Video
+        run: |
+          ffmpeg -y \
+            -loop 1 -i bg.jpg \
+            -i output.mp3 \
+            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=90'" \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -r 30 \
+            -t "${{ steps.duration.outputs.duration }}" \
+            -c:a aac \
+            -b:a 192k \
+            -shortest \
+            final_video.mp4
+
       - name: Verify outputs
         run: |
           echo "===== OUTPUT FILES ====="
           ls -lh
           test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
           test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
+          test -f final_video.mp4 || (echo "final_video.mp4 missing" && exit 1)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -83,3 +143,4 @@ jobs:
             transcript.txt
             transcript.vtt
             transcript.json
+            final_video.mp4
