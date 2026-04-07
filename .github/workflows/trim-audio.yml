@@ -207,9 +207,9 @@ jobs:
                   out.append("PlayResY: 1080")
               elif l.startswith("Style: Default") and not style_replaced:
                   # Alignment=1 => bottom-left text inside right-side subtitle area
-                  # MarginL=820 => starts after headline safe zone
+                  # MarginL=1000 => starts after headline safe zone
                   # MarginR=95 => right padding
-                  # MarginV=165 => slightly above bottom
+                  # MarginV=265 => slightly above bottom
                   out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,820,95,165")
                   style_replaced = True
               else:
@@ -233,7 +233,7 @@ jobs:
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=790:y=610:w=1085:h=260:color=black@0.38:t=fill,drawbox=x=790:y=610:w=1085:h=260:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=900:y=610:w=685:h=260:color=black@0.38:t=fill,drawbox=x=900:y=610:w=685:h=260:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           echo "Using filter:"
           echo "$FILTER"
