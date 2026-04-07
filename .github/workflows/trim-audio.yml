@@ -208,7 +208,7 @@ jobs:
               elif l.startswith("Style: Default") and not style_replaced:
                   # FONT SAME rakha gaya hai (38)
                   # MarginL/R/V ko black box ke andar fit karne ke liye tune kiya gaya hai
-                  out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1135,135,305")
+                  out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1135,135,325")
                   style_replaced = True
               else:
                   out.append(l)
