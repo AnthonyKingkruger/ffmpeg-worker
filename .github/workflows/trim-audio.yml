@@ -103,7 +103,7 @@ jobs:
           sed -i 's/\r$//' transcript_raw.srt || true
           ls -lh || true
 
-      - name: Clean + Rewrap SRT (2 lines max, right-side friendly)
+      - name: Clean + Rewrap SRT (max 3 lines, subtitle card friendly)
         run: |
           set -e
           python3 << 'PY'
@@ -127,7 +127,7 @@ jobs:
               t = t.replace(" ,", ",").replace(" .", ".")
               return t.strip()
 
-          def wrap_two_lines_right_area(text, width=26):
+          def wrap_three_lines_card(text, width=28):
               wrapped = textwrap.wrap(
                   text,
                   width=width,
@@ -135,28 +135,30 @@ jobs:
                   break_on_hyphens=False
               )
 
-              if len(wrapped) <= 2:
+              if len(wrapped) <= 3:
                   return "\n".join(wrapped)
 
               words = text.split()
               best = None
 
-              for i in range(1, len(words)):
-                  l1 = " ".join(words[:i])
-                  l2 = " ".join(words[i:])
+              # try balanced 3-line split
+              for i in range(1, len(words)-1):
+                  for j in range(i+1, len(words)):
+                      l1 = " ".join(words[:i])
+                      l2 = " ".join(words[i:j])
+                      l3 = " ".join(words[j:])
 
-                  # Keep within right-side readable area
-                  if len(l1) <= 30 and len(l2) <= 34:
-                      # Prefer slightly fuller second line
-                      score = abs((len(l2) + 4) - len(l1))
-                      if best is None or score < best[0]:
-                          best = (score, l1, l2)
+                      if len(l1) <= 32 and len(l2) <= 34 and len(l3) <= 36:
+                          score = max(len(l1), len(l2), len(l3)) - min(len(l1), len(l2), len(l3))
+                          if best is None or score < best[0]:
+                              best = (score, l1, l2, l3)
 
               if best:
-                  return best[1] + "\n" + best[2]
+                  return best[1] + "\n" + best[2] + "\n" + best[3]
 
-              mid = len(words) // 2
-              return " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
+              # fallback
+              lines = textwrap.wrap(text, width=28, break_long_words=False, break_on_hyphens=False)
+              return "\n".join(lines[:3])
 
           new_blocks = []
           idx = 1
@@ -172,7 +174,7 @@ jobs:
               if not text:
                   continue
 
-              text = wrap_two_lines_right_area(text, width=26)
+              text = wrap_three_lines_card(text, width=28)
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
 
@@ -181,9 +183,9 @@ jobs:
           PY
 
           echo "===== transcript.srt preview ====="
-          head -n 60 transcript.srt || true
+          head -n 80 transcript.srt || true
 
-      - name: Convert to ASS (Right Area + Left Aligned Text)
+      - name: Convert to ASS (Right Subtitle Card Layout)
         run: |
           set -e
           ffmpeg -y -i transcript.srt transcript.ass
@@ -204,11 +206,11 @@ jobs:
               elif l.startswith("PlayResY:"):
                   out.append("PlayResY: 1080")
               elif l.startswith("Style: Default") and not style_replaced:
-                  # Alignment=1 => bottom-left
-                  # MarginL=760 => subtitle area starts AFTER headline box
-                  # MarginR=90 => right padding
-                  # MarginV=190 => slightly above bottom
-                  out.append("Style: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,1,760,90,190")
+                  # Alignment=1 => bottom-left text inside right-side subtitle area
+                  # MarginL=820 => starts after headline safe zone
+                  # MarginR=95 => right padding
+                  # MarginV=165 => slightly above bottom
+                  out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,820,95,165")
                   style_replaced = True
               else:
                   out.append(l)
@@ -227,13 +229,19 @@ jobs:
           echo "duration=$D" >> $GITHUB_OUTPUT
           echo "Detected duration: $D"
 
-      - name: Create Final Video (No Box + Right Safe Subtitle Area)
+      - name: Create Final Video (Right Safe Subtitle Card)
         run: |
           set -e
+
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=790:y=610:w=1085:h=260:color=black@0.38:t=fill,drawbox=x=790:y=610:w=1085:h=260:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+
+          echo "Using filter:"
+          echo "$FILTER"
+
           ffmpeg -y \
             -loop 1 -framerate 30 -i bg.jpg \
             -i output.mp3 \
-            -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,ass=transcript.ass" \
+            -filter_complex "$FILTER" \
             -c:v libx264 \
             -preset medium \
             -crf 20 \
