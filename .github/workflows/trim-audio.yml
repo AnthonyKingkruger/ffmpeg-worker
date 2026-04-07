@@ -208,7 +208,7 @@ jobs:
               elif l.startswith("Style: Default") and not style_replaced:
                   # FONT SAME rakha gaya hai (38)
                   # MarginL/R/V ko black box ke andar fit karne ke liye tune kiya gaya hai
-                  out.append("Style: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1135,135,360")
+                  out.append("Style: Default,DejaVu Sans,48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1135,135,360")
                   style_replaced = True
               else:
                   out.append(l)
@@ -231,7 +231,7 @@ jobs:
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1100:y=540:w=680:h=280:color=black@0.42:t=fill,drawbox=x=1100:y=540:w=680:h=280:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1050:y=540:w=690:h=280:color=black@0.42:t=fill,drawbox=x=1050:y=540:w=690:h=280:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           echo "Using filter:"
           echo "$FILTER"
