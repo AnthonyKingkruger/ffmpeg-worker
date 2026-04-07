@@ -79,7 +79,7 @@ jobs:
       - name: Trim Audio (remove first 5.5 sec)
         run: |
           set -e
-          ffmpeg -y -ss 00:04:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          ffmpeg -y -ss 00:05:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
           file output.mp3 || true
           ls -lh output.mp3 || true
 
@@ -103,7 +103,7 @@ jobs:
           sed -i 's/\r$//' transcript_raw.srt || true
           ls -lh || true
 
-      - name: Clean + Rewrap SRT (max 3 lines, subtitle card friendly)
+      - name: Clean + Rewrap SRT (Premium CNBC card wrapping)
         run: |
           set -e
           python3 << 'PY'
@@ -127,7 +127,8 @@ jobs:
               t = t.replace(" ,", ",").replace(" .", ".")
               return t.strip()
 
-          def wrap_three_lines_card(text, width=24):
+          def smart_wrap_card(text, width=26, max_lines=3):
+              # First normal wrap
               wrapped = textwrap.wrap(
                   text,
                   width=width,
@@ -135,30 +136,42 @@ jobs:
                   break_on_hyphens=False
               )
 
-              if len(wrapped) <= 3:
+              if len(wrapped) <= max_lines:
                   return "\n".join(wrapped)
 
               words = text.split()
               best = None
 
-              # try balanced 3-line split
+              # Try balanced 3-line split
               for i in range(1, len(words)-1):
                   for j in range(i+1, len(words)):
-                      l1 = " ".join(words[:i])
-                      l2 = " ".join(words[i:j])
-                      l3 = " ".join(words[j:])
+                      l1 = " ".join(words[:i]).strip()
+                      l2 = " ".join(words[i:j]).strip()
+                      l3 = " ".join(words[j:]).strip()
 
-                      if len(l1) <= 26 and len(l2) <= 28 and len(l3) <= 30:
-                          score = max(len(l1), len(l2), len(l3)) - min(len(l1), len(l2), len(l3))
+                      if not l1 or not l2 or not l3:
+                          continue
+
+                      max_len = max(len(l1), len(l2), len(l3))
+                      min_len = min(len(l1), len(l2), len(l3))
+
+                      # safer lengths for 38px font inside 610x280 card
+                      if len(l1) <= 30 and len(l2) <= 31 and len(l3) <= 32:
+                          score = (max_len - min_len) + abs(len(l2)-len(l1))*0.5 + abs(len(l3)-len(l2))*0.5
                           if best is None or score < best[0]:
                               best = (score, l1, l2, l3)
 
               if best:
                   return best[1] + "\n" + best[2] + "\n" + best[3]
 
-              # fallback
-              lines = textwrap.wrap(text, width=24, break_long_words=False, break_on_hyphens=False)
-              return "\n".join(lines[:3])
+              # fallback hard wrap
+              wrapped = textwrap.wrap(
+                  text,
+                  width=24,
+                  break_long_words=False,
+                  break_on_hyphens=False
+              )
+              return "\n".join(wrapped[:3])
 
           new_blocks = []
           idx = 1
@@ -174,7 +187,7 @@ jobs:
               if not text:
                   continue
 
-              text = wrap_three_lines_card(text, width=24)
+              text = smart_wrap_card(text, width=26, max_lines=3)
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
 
@@ -183,41 +196,102 @@ jobs:
           PY
 
           echo "===== transcript.srt preview ====="
-          head -n 80 transcript.srt || true
+          head -n 120 transcript.srt || true
 
-      - name: Convert to ASS (Right Subtitle Card Layout)
+      - name: Convert SRT to Drawtext Events (pixel-perfect subtitle placement)
         run: |
           set -e
-          ffmpeg -y -i transcript.srt transcript.ass
-
           python3 << 'PY'
+          import re
           from pathlib import Path
 
-          p = Path("transcript.ass")
-          txt = p.read_text(encoding="utf-8", errors="ignore")
-          lines = txt.splitlines()
-          out = []
+          srt_path = Path("transcript.srt")
+          out_path = Path("subs_filter.txt")
 
-          style_replaced = False
+          if not srt_path.exists():
+              raise SystemExit("transcript.srt not found")
 
-          for l in lines:
-              if l.startswith("PlayResX:"):
-                  out.append("PlayResX: 1920")
-              elif l.startswith("PlayResY:"):
-                  out.append("PlayResY: 1080")
-              elif l.startswith("Style: Default") and not style_replaced:
-                  # FONT SAME rakha gaya hai (38)
-                  # MarginL/R/V ko black box ke andar fit karne ke liye tune kiya gaya hai
-                  out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1235,135,255")
-                  style_replaced = True
+          raw = srt_path.read_text(encoding="utf-8", errors="ignore").replace("\r", "")
+          blocks = re.split(r"\n\s*\n", raw.strip())
+
+          def srt_time_to_sec(t):
+              h, m, rest = t.split(":")
+              s, ms = rest.split(",")
+              return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+
+          def esc_drawtext(s):
+              s = s.replace("\\", r"\\\\")
+              s = s.replace(":", r"\:")
+              s = s.replace("'", r"\'")
+              s = s.replace("%", r"\%")
+              s = s.replace(",", r"\,")
+              s = s.replace("[", r"\[")
+              s = s.replace("]", r"\]")
+              return s
+
+          filters = []
+
+          # CNBC-style subtitle card area
+          box_x = 1100
+          box_y = 520
+          box_w = 610
+          box_h = 280
+
+          # inner safe area
+          text_x = 1138
+          text_w = 540
+          line_h = 46
+
+          # vertical centering positions
+          y_one   = box_y + 118
+          y_two   = box_y + 95
+          y_three = box_y + 72
+
+          for block in blocks:
+              lines = [x for x in block.strip().split("\n") if x.strip()]
+              if len(lines) < 3:
+                  continue
+
+              time_line = lines[1]
+              m = re.match(r"(.+?)\s*-->\s*(.+)", time_line)
+              if not m:
+                  continue
+
+              start = srt_time_to_sec(m.group(1).strip())
+              end = srt_time_to_sec(m.group(2).strip())
+
+              txt_lines = lines[2:]
+              txt_lines = [esc_drawtext(t.strip()) for t in txt_lines if t.strip()]
+              n = len(txt_lines)
+
+              if n == 1:
+                  ys = [y_one]
+              elif n == 2:
+                  ys = [y_two, y_two + line_h]
               else:
-                  out.append(l)
+                  ys = [y_three, y_three + line_h, y_three + line_h*2]
 
-          p.write_text("\n".join(out), encoding="utf-8")
+              for i, t in enumerate(txt_lines[:3]):
+                  filters.append(
+                      f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+                      f"text='{t}':"
+                      f"fontsize=38:"
+                      f"fontcolor=white:"
+                      f"line_spacing=8:"
+                      f"x={text_x}:"
+                      f"y={ys[i]}:"
+                      f"shadowcolor=black@0.75:"
+                      f"shadowx=2:"
+                      f"shadowy=2:"
+                      f"enable='between(t,{start:.3f},{end:.3f})'"
+                  )
+
+          out_path.write_text(",\n".join(filters), encoding="utf-8")
+          print("subs_filter.txt generated successfully")
           PY
 
-          echo "===== transcript.ass preview ====="
-          head -n 50 transcript.ass || true
+          echo "===== subs_filter.txt preview ====="
+          head -n 40 subs_filter.txt || true
 
       - name: Get Duration
         id: duration
@@ -227,14 +301,21 @@ jobs:
           echo "duration=$D" >> $GITHUB_OUTPUT
           echo "Detected duration: $D"
 
-      - name: Create Final Video (Right Safe Subtitle Card)
+      - name: Create Final Video (Premium CNBC subtitle card)
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1100:y=540:w=610:h=280:color=black@0.42:t=fill,drawbox=x=1100:y=540:w=610:h=280:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+          SUB_FILTER=$(cat subs_filter.txt)
+
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,\
+drawbox=x=1100:y=520:w=610:h=280:color=black@0.42:t=fill,\
+drawbox=x=1100:y=520:w=610:h=280:color=white@0.08:t=2,\
+drawbox=x=1100:y=520:w=610:h=1:color=white@0.10:t=fill,\
+${SUB_FILTER}"
 
           echo "Using filter:"
-          echo "$FILTER"
+          echo "$FILTER" > filter_debug.txt
+          head -c 3000 filter_debug.txt || true
 
           ffmpeg -y \
             -loop 1 -framerate 30 -i bg.jpg \
@@ -261,8 +342,10 @@ jobs:
           test -f output.mp3
           test -f transcript_raw.srt
           test -f transcript.srt
-          test -f transcript.ass
           test -f transcript.txt
+          test -f transcript.vtt || true
+          test -f transcript.json || true
+          test -f subs_filter.txt
           test -f final_video.mp4
 
       - name: Upload Artifact
@@ -273,8 +356,9 @@ jobs:
             output.mp3
             transcript_raw.srt
             transcript.srt
-            transcript.ass
             transcript.txt
             transcript.vtt
             transcript.json
+            subs_filter.txt
+            filter_debug.txt
             final_video.mp4
