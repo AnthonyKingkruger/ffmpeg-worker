@@ -1,5 +1,5 @@
 # ============================================================
-# FILE 1: .github/workflows/trim-audio.yml
+# FILE: .github/workflows/trim-audio.yml
 # ============================================================
 
 name: Trim Audio + SRT + Final Video
@@ -36,18 +36,21 @@ jobs:
 
       - name: Download MP3
         run: |
+          set -e
           curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
           file input.mp3 || true
           ls -lh input.mp3 || true
 
       - name: Download Image
         run: |
+          set -e
           curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
           file input_image || true
           ls -lh input_image || true
 
       - name: Validate MP3
         run: |
+          set -e
           if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
             echo "Invalid MP3 file"
             exit 1
@@ -70,12 +73,19 @@ jobs:
             cp image.jpg bg.jpg
           fi
 
+          file bg.jpg || true
+          ls -lh bg.jpg || true
+
       - name: Trim Audio (remove first 5.5 sec)
         run: |
+          set -e
           ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          file output.mp3 || true
+          ls -lh output.mp3 || true
 
-      - name: Generate SRT + TXT (Whisper)
+      - name: Generate SRT + TXT + VTT + JSON (Whisper)
         run: |
+          set -e
           whisper output.mp3 \
             --model base \
             --task transcribe \
@@ -85,39 +95,66 @@ jobs:
 
       - name: Rename Outputs
         run: |
+          set -e
           [ -f output.srt ] && mv output.srt transcript.srt || true
           [ -f output.txt ] && mv output.txt transcript.txt || true
           [ -f output.vtt ] && mv output.vtt transcript.vtt || true
           [ -f output.json ] && mv output.json transcript.json || true
 
+          ls -lh || true
+
       - name: Fix SRT
-        run: sed -i 's/\r$//' transcript.srt || true
+        run: |
+          set -e
+          sed -i 's/\r$//' transcript.srt || true
+
+          if [ ! -f transcript.srt ]; then
+            echo "transcript.srt not found"
+            exit 1
+          fi
 
       - name: Get Duration
         id: duration
         run: |
+          set -e
           D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
           echo "duration=$D" >> $GITHUB_OUTPUT
+          echo "Detected duration: $D"
 
-      - name: Create Video
+      - name: Create Video (1920x1080 + Better Subs)
         run: |
+          set -e
+
+          FILTER="scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=22,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HAA000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginL=140,MarginR=140,MarginV=80'"
+
+          echo "Using filter:"
+          echo "$FILTER"
+
           ffmpeg -y \
             -loop 1 -i bg.jpg \
             -i output.mp3 \
-            -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,subtitles=transcript.srt:force_style='FontName=Arial,FontSize=22,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HAA000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginL=140,MarginR=140,MarginV=80'"
+            -vf "$FILTER" \
             -c:v libx264 \
+            -preset medium \
+            -crf 20 \
             -pix_fmt yuv420p \
             -r 30 \
-            -t ${{ steps.duration.outputs.duration }} \
+            -t "${{ steps.duration.outputs.duration }}" \
             -c:a aac \
             -b:a 192k \
-            -shortest final_video.mp4
+            -shortest \
+            final_video.mp4
+
+          file final_video.mp4 || true
+          ls -lh final_video.mp4 || true
 
       - name: Verify Outputs
         run: |
+          set -e
           ls -lh
           test -f output.mp3
           test -f transcript.srt
+          test -f transcript.txt
           test -f final_video.mp4
 
       - name: Upload Artifact
