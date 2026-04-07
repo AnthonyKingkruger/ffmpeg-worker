@@ -104,7 +104,7 @@ jobs:
           ffmpeg -y \
             -loop 1 -i bg.jpg \
             -i output.mp3 \
-            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,BackColour=&H80000000,BorderStyle=3,Outline=1,Alignment=2,MarginV=90'" \
+            -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,subtitles=transcript.srt:force_style='FontName=Arial,FontSize=22,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HAA000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginL=140,MarginR=140,MarginV=80'"
             -c:v libx264 \
             -pix_fmt yuv420p \
             -r 30 \
