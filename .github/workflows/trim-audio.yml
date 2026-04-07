@@ -121,17 +121,17 @@ jobs:
           echo "duration=$D" >> $GITHUB_OUTPUT
           echo "Detected duration: $D"
 
-      - name: Create Video (1920x1080 + Right Bottom Subtitle Box)
+      - name: Create Video (1920x1080 + Visible Subtitle Box)
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1060:y=700:w=780:h=280:color=black@0.50:t=fill[subbg];[subbg]subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=21,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginL=1100,MarginR=90,MarginV=110'"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=920:y=760:w=900:h=220:color=black@0.45:t=fill[subbg];[subbg]subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=18,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=140'"
 
           echo "Using filter:"
           echo "$FILTER"
 
           ffmpeg -y \
-            -loop 1 -i bg.jpg \
+            -loop 1 -framerate 30 -i bg.jpg \
             -i output.mp3 \
             -filter_complex "$FILTER" \
             -c:v libx264 \
