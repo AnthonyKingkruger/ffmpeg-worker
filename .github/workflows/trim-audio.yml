@@ -1,3 +1,7 @@
+# ============================================================
+# FILE: .github/workflows/trim-audio.yml
+# ============================================================
+
 name: Trim Audio + SRT + Final Video
 
 on:
@@ -243,7 +247,7 @@ jobs:
             -crf 20 \
             -pix_fmt yuv420p \
             -r 30 \
-            -t 10 \
+            -t "${{ steps.duration.outputs.duration }}" \
             -c:a aac \
             -b:a 192k \
             -shortest \
