@@ -1,3 +1,7 @@
+# ============================================================
+# FILE 1: .github/workflows/trim-audio.yml
+# ============================================================
+
 name: Trim Audio + SRT + Final Video
 
 on:
@@ -33,14 +37,12 @@ jobs:
       - name: Download MP3
         run: |
           curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
-          echo "===== FILE INFO ====="
           file input.mp3 || true
           ls -lh input.mp3 || true
 
-      - name: Download Final Image
+      - name: Download Image
         run: |
           curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
-          echo "===== IMAGE INFO ====="
           file input_image || true
           ls -lh input_image || true
 
@@ -54,7 +56,6 @@ jobs:
       - name: Normalize Image
         run: |
           set -e
-
           if file input_image | grep -qi 'PNG'; then
             mv input_image image.png
             ffmpeg -y -i image.png -q:v 2 bg.jpg
@@ -65,25 +66,15 @@ jobs:
             mv input_image image.webp
             ffmpeg -y -i image.webp -q:v 2 bg.jpg
           else
-            echo "Unknown image type, trying as jpg"
             mv input_image image.jpg
             cp image.jpg bg.jpg
           fi
 
-          ls -lh
-
-      - name: Remove first 5.5 sec
+      - name: Trim Audio (remove first 5.5 sec)
         run: |
           ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
 
-      - name: Verify trimmed MP3
-        run: |
-          echo "===== TRIMMED FILE INFO ====="
-          file output.mp3 || true
-          ls -lh output.mp3 || true
-          test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
-
-      - name: Generate SRT + TXT
+      - name: Generate SRT + TXT (Whisper)
         run: |
           whisper output.mp3 \
             --model base \
@@ -92,48 +83,44 @@ jobs:
             --output_format all \
             --output_dir .
 
-      - name: Rename outputs nicely
+      - name: Rename Outputs
         run: |
-          if [ -f "output.srt" ]; then mv output.srt transcript.srt; fi
-          if [ -f "output.txt" ]; then mv output.txt transcript.txt; fi
-          if [ -f "output.vtt" ]; then mv output.vtt transcript.vtt; fi
-          if [ -f "output.json" ]; then mv output.json transcript.json; fi
+          [ -f output.srt ] && mv output.srt transcript.srt || true
+          [ -f output.txt ] && mv output.txt transcript.txt || true
+          [ -f output.vtt ] && mv output.vtt transcript.vtt || true
+          [ -f output.json ] && mv output.json transcript.json || true
 
-      - name: Fix subtitle line endings
-        run: |
-          sed -i 's/\r$//' transcript.srt || true
+      - name: Fix SRT
+        run: sed -i 's/\r$//' transcript.srt || true
 
-      - name: Get trimmed audio duration
+      - name: Get Duration
         id: duration
         run: |
-          DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
-          echo "duration=$DURATION" >> $GITHUB_OUTPUT
-          echo "Trimmed Audio Duration: $DURATION"
+          D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
+          echo "duration=$D" >> $GITHUB_OUTPUT
 
-      - name: Create Final Video
+      - name: Create Video
         run: |
           ffmpeg -y \
             -loop 1 -i bg.jpg \
             -i output.mp3 \
-            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=90'" \
+            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles=transcript.srt:force_style='FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,BackColour=&H80000000,BorderStyle=3,Outline=1,Alignment=2,MarginV=90'" \
             -c:v libx264 \
             -pix_fmt yuv420p \
             -r 30 \
-            -t "${{ steps.duration.outputs.duration }}" \
+            -t ${{ steps.duration.outputs.duration }} \
             -c:a aac \
             -b:a 192k \
-            -shortest \
-            final_video.mp4
+            -shortest final_video.mp4
 
-      - name: Verify outputs
+      - name: Verify Outputs
         run: |
-          echo "===== OUTPUT FILES ====="
           ls -lh
-          test -f output.mp3 || (echo "output.mp3 missing" && exit 1)
-          test -f transcript.srt || (echo "transcript.srt missing" && exit 1)
-          test -f final_video.mp4 || (echo "final_video.mp4 missing" && exit 1)
+          test -f output.mp3
+          test -f transcript.srt
+          test -f final_video.mp4
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: trimmed
