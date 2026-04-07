@@ -79,7 +79,7 @@ jobs:
       - name: Trim Audio (remove first 5.5 sec)
         run: |
           set -e
-          ffmpeg -y -ss 00:05:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
           file output.mp3 || true
           ls -lh output.mp3 || true
 
