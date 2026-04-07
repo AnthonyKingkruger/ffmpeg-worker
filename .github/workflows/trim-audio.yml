@@ -38,11 +38,15 @@ jobs:
         run: |
           set -e
           curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
+          file input.mp3 || true
+          ls -lh input.mp3 || true
 
       - name: Download Image
         run: |
           set -e
           curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
+          file input_image || true
+          ls -lh input_image || true
 
       - name: Validate MP3
         run: |
@@ -69,28 +73,37 @@ jobs:
             cp image.jpg bg.jpg
           fi
 
-      - name: Trim Audio
+          file bg.jpg || true
+          ls -lh bg.jpg || true
+
+      - name: Trim Audio (remove first 5.5 sec)
         run: |
           set -e
           ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          file output.mp3 || true
+          ls -lh output.mp3 || true
 
-      - name: Generate SRT
+      - name: Generate SRT + TXT + VTT + JSON (Whisper)
         run: |
           set -e
           whisper output.mp3 \
             --model base \
             --task transcribe \
             --language en \
-            --output_format srt \
+            --output_format all \
             --output_dir .
 
-      - name: Rename SRT
+      - name: Rename Outputs
         run: |
           set -e
-          mv output.srt transcript_raw.srt
+          [ -f output.srt ] && mv output.srt transcript_raw.srt || true
+          [ -f output.txt ] && mv output.txt transcript.txt || true
+          [ -f output.vtt ] && mv output.vtt transcript.vtt || true
+          [ -f output.json ] && mv output.json transcript.json || true
           sed -i 's/\r$//' transcript_raw.srt || true
+          ls -lh || true
 
-      - name: Clean + Rewrap SRT (2 lines max, right-friendly)
+      - name: Clean + Rewrap SRT (2 lines max, right-side friendly)
         run: |
           set -e
           python3 << 'PY'
@@ -101,6 +114,9 @@ jobs:
           inp = Path("transcript_raw.srt")
           outp = Path("transcript.srt")
 
+          if not inp.exists():
+              raise SystemExit("transcript_raw.srt not found")
+
           raw = inp.read_text(encoding="utf-8", errors="ignore").replace("\r", "")
           blocks = re.split(r"\n\s*\n", raw.strip())
 
@@ -108,28 +124,30 @@ jobs:
               t = t.replace("\n", " ").strip()
               t = re.sub(r"\s+", " ", t)
               t = re.sub(r"\s+([,.!?;:])", r"\1", t)
+              t = t.replace(" ,", ",").replace(" .", ".")
               return t.strip()
 
-          def wrap_two_lines_right(text, width=26):
-              lines = textwrap.wrap(
+          def wrap_two_lines_right_area(text, width=26):
+              wrapped = textwrap.wrap(
                   text,
                   width=width,
                   break_long_words=False,
                   break_on_hyphens=False
               )
 
-              if len(lines) <= 2:
-                  return "\n".join(lines)
+              if len(wrapped) <= 2:
+                  return "\n".join(wrapped)
 
               words = text.split()
-
-              # Prefer slightly longer second line so it visually hugs right side better
               best = None
+
               for i in range(1, len(words)):
                   l1 = " ".join(words[:i])
                   l2 = " ".join(words[i:])
 
+                  # Keep within right-side readable area
                   if len(l1) <= 30 and len(l2) <= 34:
+                      # Prefer slightly fuller second line
                       score = abs((len(l2) + 4) - len(l1))
                       if best is None or score < best[0]:
                           best = (score, l1, l2)
@@ -154,7 +172,7 @@ jobs:
               if not text:
                   continue
 
-              text = wrap_two_lines_right(text, width=26)
+              text = wrap_two_lines_right_area(text, width=26)
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
 
@@ -162,7 +180,10 @@ jobs:
           print("Cleaned transcript.srt written successfully")
           PY
 
-      - name: Convert to ASS (Right Bottom + Big Font + Right Align)
+          echo "===== transcript.srt preview ====="
+          head -n 60 transcript.srt || true
+
+      - name: Convert to ASS (Right Area + Left Aligned Text)
         run: |
           set -e
           ffmpeg -y -i transcript.srt transcript.ass
@@ -183,7 +204,11 @@ jobs:
               elif l.startswith("PlayResY:"):
                   out.append("PlayResY: 1080")
               elif l.startswith("Style: Default") and not style_replaced:
-                  out.append("Style: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,3,90,90,190")
+                  # Alignment=1 => bottom-left
+                  # MarginL=760 => subtitle area starts AFTER headline box
+                  # MarginR=90 => right padding
+                  # MarginV=190 => slightly above bottom
+                  out.append("Style: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,1,760,90,190")
                   style_replaced = True
               else:
                   out.append(l)
@@ -191,14 +216,18 @@ jobs:
           p.write_text("\n".join(out), encoding="utf-8")
           PY
 
+          echo "===== transcript.ass preview ====="
+          head -n 50 transcript.ass || true
+
       - name: Get Duration
         id: duration
         run: |
           set -e
           D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
           echo "duration=$D" >> $GITHUB_OUTPUT
+          echo "Detected duration: $D"
 
-      - name: Create Final Video (No Box + Right Bottom Subs)
+      - name: Create Final Video (No Box + Right Safe Subtitle Area)
         run: |
           set -e
           ffmpeg -y \
@@ -216,7 +245,21 @@ jobs:
             -shortest \
             final_video.mp4
 
-      - name: Upload
+          file final_video.mp4 || true
+          ls -lh final_video.mp4 || true
+
+      - name: Verify Outputs
+        run: |
+          set -e
+          ls -lh
+          test -f output.mp3
+          test -f transcript_raw.srt
+          test -f transcript.srt
+          test -f transcript.ass
+          test -f transcript.txt
+          test -f final_video.mp4
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: final
@@ -225,4 +268,7 @@ jobs:
             transcript_raw.srt
             transcript.srt
             transcript.ass
+            transcript.txt
+            transcript.vtt
+            transcript.json
             final_video.mp4
