@@ -79,7 +79,7 @@ jobs:
       - name: Trim Audio (remove first 5.5 sec)
         run: |
           set -e
-          ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          ffmpeg -y -ss 00:04:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
           file output.mp3 || true
           ls -lh output.mp3 || true
 
@@ -127,7 +127,7 @@ jobs:
               t = t.replace(" ,", ",").replace(" .", ".")
               return t.strip()
 
-          def wrap_three_lines_card(text, width=28):
+          def wrap_three_lines_card(text, width=24):
               wrapped = textwrap.wrap(
                   text,
                   width=width,
@@ -148,7 +148,7 @@ jobs:
                       l2 = " ".join(words[i:j])
                       l3 = " ".join(words[j:])
 
-                      if len(l1) <= 32 and len(l2) <= 34 and len(l3) <= 36:
+                      if len(l1) <= 26 and len(l2) <= 28 and len(l3) <= 30:
                           score = max(len(l1), len(l2), len(l3)) - min(len(l1), len(l2), len(l3))
                           if best is None or score < best[0]:
                               best = (score, l1, l2, l3)
@@ -157,7 +157,7 @@ jobs:
                   return best[1] + "\n" + best[2] + "\n" + best[3]
 
               # fallback
-              lines = textwrap.wrap(text, width=28, break_long_words=False, break_on_hyphens=False)
+              lines = textwrap.wrap(text, width=24, break_long_words=False, break_on_hyphens=False)
               return "\n".join(lines[:3])
 
           new_blocks = []
@@ -174,7 +174,7 @@ jobs:
               if not text:
                   continue
 
-              text = wrap_three_lines_card(text, width=28)
+              text = wrap_three_lines_card(text, width=24)
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
 
@@ -206,11 +206,9 @@ jobs:
               elif l.startswith("PlayResY:"):
                   out.append("PlayResY: 1080")
               elif l.startswith("Style: Default") and not style_replaced:
-                  # Alignment=1 => bottom-left text inside right-side subtitle area
-                  # MarginL=1200 => starts after headline safe zone
-                  # MarginR=95 => right padding
-                  # MarginV=320 => slightly above bottom
-                  out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1150,95,165")
+                  # FONT SAME rakha gaya hai (38)
+                  # MarginL/R/V ko black box ke andar fit karne ke liye tune kiya gaya hai
+                  out.append("Style: Default,DejaVu Sans,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,1,0,0,0,100,100,0,0,1,2,0,1,1135,135,255")
                   style_replaced = True
               else:
                   out.append(l)
@@ -233,7 +231,7 @@ jobs:
         run: |
           set -e
 
-          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1100:y=610:w=585:h=320:color=black@0.38:t=fill,drawbox=x=1100:y=610:w=585:h=320:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
+          FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1100:y=540:w=610:h=280:color=black@0.42:t=fill,drawbox=x=1100:y=540:w=610:h=280:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           echo "Using filter:"
           echo "$FILTER"
