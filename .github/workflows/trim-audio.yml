@@ -44,15 +44,26 @@ jobs:
           set -e
           curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
 
+      - name: Validate MP3
+        run: |
+          set -e
+          if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
+            echo "Invalid MP3 file"
+            exit 1
+          fi
+
       - name: Normalize Image
         run: |
           set -e
           if file input_image | grep -qi 'PNG'; then
             mv input_image image.png
-            ffmpeg -y -i image.png bg.jpg
+            ffmpeg -y -i image.png -q:v 2 bg.jpg
           elif file input_image | grep -qi 'JPEG'; then
             mv input_image image.jpg
             cp image.jpg bg.jpg
+          elif file input_image | grep -qi 'Web/P'; then
+            mv input_image image.webp
+            ffmpeg -y -i image.webp -q:v 2 bg.jpg
           else
             mv input_image image.jpg
             cp image.jpg bg.jpg
@@ -60,10 +71,12 @@ jobs:
 
       - name: Trim Audio
         run: |
-          ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame output.mp3
+          set -e
+          ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
 
       - name: Generate SRT
         run: |
+          set -e
           whisper output.mp3 \
             --model base \
             --task transcribe \
@@ -73,79 +86,133 @@ jobs:
 
       - name: Rename SRT
         run: |
-          mv output.srt transcript.srt
+          set -e
+          mv output.srt transcript_raw.srt
+          sed -i 's/\r$//' transcript_raw.srt || true
 
-      - name: Clean + Rewrap SRT (2 lines max)
+      - name: Clean + Rewrap SRT (2 lines max, right-friendly)
         run: |
+          set -e
           python3 << 'PY'
-          import re, textwrap
+          import re
+          import textwrap
           from pathlib import Path
 
-          raw = Path("transcript.srt").read_text().replace("\r","")
+          inp = Path("transcript_raw.srt")
+          outp = Path("transcript.srt")
+
+          raw = inp.read_text(encoding="utf-8", errors="ignore").replace("\r", "")
           blocks = re.split(r"\n\s*\n", raw.strip())
 
-          def wrap(text):
-              lines = textwrap.wrap(text, width=28)
+          def clean_text(t):
+              t = t.replace("\n", " ").strip()
+              t = re.sub(r"\s+", " ", t)
+              t = re.sub(r"\s+([,.!?;:])", r"\1", t)
+              return t.strip()
+
+          def wrap_two_lines_right(text, width=26):
+              lines = textwrap.wrap(
+                  text,
+                  width=width,
+                  break_long_words=False,
+                  break_on_hyphens=False
+              )
+
               if len(lines) <= 2:
                   return "\n".join(lines)
-              mid = len(lines)//2
-              return " ".join(lines[:mid]) + "\n" + " ".join(lines[mid:])
 
-          out = []
-          i = 1
-          for b in blocks:
-              parts = b.split("\n")
-              if len(parts) < 3: continue
-              t = " ".join(parts[2:])
-              t = re.sub(r"\s+"," ",t).strip()
-              t = wrap(t)
-              out.append(f"{i}\n{parts[1]}\n{t}")
-              i+=1
+              words = text.split()
 
-          Path("final.srt").write_text("\n\n".join(out))
+              # Prefer slightly longer second line so it visually hugs right side better
+              best = None
+              for i in range(1, len(words)):
+                  l1 = " ".join(words[:i])
+                  l2 = " ".join(words[i:])
+
+                  if len(l1) <= 30 and len(l2) <= 34:
+                      score = abs((len(l2) + 4) - len(l1))
+                      if best is None or score < best[0]:
+                          best = (score, l1, l2)
+
+              if best:
+                  return best[1] + "\n" + best[2]
+
+              mid = len(words) // 2
+              return " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
+
+          new_blocks = []
+          idx = 1
+
+          for block in blocks:
+              lines = [x for x in block.strip().split("\n") if x.strip()]
+              if len(lines) < 3:
+                  continue
+
+              time_line = lines[1].strip()
+              text = clean_text(" ".join(lines[2:]))
+
+              if not text:
+                  continue
+
+              text = wrap_two_lines_right(text, width=26)
+              new_blocks.append(f"{idx}\n{time_line}\n{text}")
+              idx += 1
+
+          outp.write_text("\n\n".join(new_blocks) + "\n", encoding="utf-8")
+          print("Cleaned transcript.srt written successfully")
           PY
 
-      - name: Convert to ASS (Right Bottom + Big Font)
+      - name: Convert to ASS (Right Bottom + Big Font + Right Align)
         run: |
-          ffmpeg -y -i final.srt final.ass
+          set -e
+          ffmpeg -y -i transcript.srt transcript.ass
 
           python3 << 'PY'
           from pathlib import Path
-          p = Path("final.ass")
-          txt = p.read_text()
+
+          p = Path("transcript.ass")
+          txt = p.read_text(encoding="utf-8", errors="ignore")
           lines = txt.splitlines()
           out = []
+
+          style_replaced = False
 
           for l in lines:
               if l.startswith("PlayResX:"):
                   out.append("PlayResX: 1920")
               elif l.startswith("PlayResY:"):
                   out.append("PlayResY: 1080")
-              elif l.startswith("Style: Default"):
-                  out.append("Style: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,3,80,80,180")
+              elif l.startswith("Style: Default") and not style_replaced:
+                  out.append("Style: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,3,90,90,190")
+                  style_replaced = True
               else:
                   out.append(l)
 
-          p.write_text("\n".join(out))
+          p.write_text("\n".join(out), encoding="utf-8")
           PY
 
       - name: Get Duration
         id: duration
         run: |
+          set -e
           D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
           echo "duration=$D" >> $GITHUB_OUTPUT
 
-      - name: Create Final Video (NO BOX)
+      - name: Create Final Video (No Box + Right Bottom Subs)
         run: |
+          set -e
           ffmpeg -y \
             -loop 1 -framerate 30 -i bg.jpg \
             -i output.mp3 \
-            -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,ass=final.ass" \
+            -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,ass=transcript.ass" \
             -c:v libx264 \
+            -preset medium \
+            -crf 20 \
             -pix_fmt yuv420p \
             -r 30 \
             -t "${{ steps.duration.outputs.duration }}" \
             -c:a aac \
+            -b:a 192k \
             -shortest \
             final_video.mp4
 
@@ -153,4 +220,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: final
-          path: final_video.mp4
+          path: |
+            output.mp3
+            transcript_raw.srt
+            transcript.srt
+            transcript.ass
+            final_video.mp4
