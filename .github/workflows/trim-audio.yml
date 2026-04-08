@@ -39,20 +39,21 @@ jobs:
         run: |
           set -e
           curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
-          file input.mp3 || true
-          ls -lh input.mp3 || true
+          ls -lh input.mp3
 
       - name: Download Image
         run: |
           set -e
           curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
-          file input_image || true
-          ls -lh input_image || true
+          ls -lh input_image
 
-      - name: Validate MP3
+      - name: Validate MP3 with ffprobe
         run: |
           set -e
-          if ! file input.mp3 | grep -Eiq "Audio|MPEG|MP3"; then
+          ffprobe -v error -show_streams input.mp3 > mp3_probe.txt 2>&1 || true
+          cat mp3_probe.txt || true
+
+          if ! grep -qi "codec_type=audio" mp3_probe.txt; then
             echo "Invalid MP3 file"
             exit 1
           fi
@@ -60,19 +61,14 @@ jobs:
       - name: Normalize Image
         run: |
           set -e
-          if file input_image | grep -qi 'PNG'; then
-            mv input_image image.png
-            ffmpeg -y -i image.png -q:v 2 bg.jpg
-          elif file input_image | grep -qi 'JPEG'; then
-            mv input_image image.jpg
-            cp image.jpg bg.jpg
-          elif file input_image | grep -qi 'Web/P'; then
-            mv input_image image.webp
-            ffmpeg -y -i image.webp -q:v 2 bg.jpg
+
+          if ffprobe -v error input_image >/dev/null 2>&1; then
+            ffmpeg -y -i input_image -frames:v 1 bg.jpg
           else
-            mv input_image image.jpg
-            cp image.jpg bg.jpg
+            cp input_image bg.jpg
           fi
+
+          ls -lh bg.jpg
 
       - name: Trim Audio (remove first 5.5 sec)
         run: |
@@ -133,10 +129,13 @@ jobs:
               lines = [x for x in block.strip().split("\n") if x.strip()]
               if len(lines) < 3:
                   continue
+
               time_line = lines[1].strip()
               text = clean_text(" ".join(lines[2:]))
+
               if not text:
                   continue
+
               text = wrap_three_lines_card(text, width=24)
               new_blocks.append(f"{idx}\n{time_line}\n{text}")
               idx += 1
@@ -155,6 +154,7 @@ jobs:
           p = Path("transcript.ass")
           txt = p.read_text(encoding="utf-8", errors="ignore")
           lines = txt.splitlines()
+
           out = []
           style_replaced = False
 
@@ -182,7 +182,6 @@ jobs:
       - name: Create Final Video
         run: |
           set -e
-
           FILTER="[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,drawbox=x=1050:y=540:w=720:h=280:color=black@0.42:t=fill,drawbox=x=1050:y=540:w=720:h=280:color=white@0.08:t=2[subbg];[subbg]ass=transcript.ass"
 
           ffmpeg -y \
