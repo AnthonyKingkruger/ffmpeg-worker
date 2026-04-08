@@ -20,6 +20,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: trim-audio-single-queue
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -38,13 +42,13 @@ jobs:
       - name: Download MP3
         run: |
           set -e
-          curl -L -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
+          curl -L --retry 3 --retry-delay 3 -A "Mozilla/5.0" -o input.mp3 "${{ github.event.inputs.mp3_url }}"
           ls -lh input.mp3
 
       - name: Download Image
         run: |
           set -e
-          curl -L -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
+          curl -L --retry 3 --retry-delay 3 -A "Mozilla/5.0" -o input_image "${{ github.event.inputs.image_url }}"
           ls -lh input_image
 
       - name: Validate MP3 with ffprobe
@@ -68,12 +72,15 @@ jobs:
             cp input_image bg.jpg
           fi
 
+          test -f bg.jpg
           ls -lh bg.jpg
 
       - name: Trim Audio (remove first 5.5 sec)
         run: |
           set -e
           ffmpeg -y -ss 00:00:05.5 -i input.mp3 -vn -acodec libmp3lame -q:a 2 output.mp3
+          test -f output.mp3
+          ls -lh output.mp3
 
       - name: Generate SRT + TXT + VTT + JSON (Whisper)
         run: |
@@ -92,6 +99,12 @@ jobs:
           [ -f output.txt ] && mv output.txt transcript.txt || true
           [ -f output.vtt ] && mv output.vtt transcript.vtt || true
           [ -f output.json ] && mv output.json transcript.json || true
+
+          if [ ! -f transcript_raw.srt ]; then
+            echo "transcript_raw.srt not found"
+            exit 1
+          fi
+
           sed -i 's/\r$//' transcript_raw.srt || true
 
       - name: Clean + Rewrap SRT
@@ -143,6 +156,8 @@ jobs:
           outp.write_text("\n\n".join(new_blocks) + "\n", encoding="utf-8")
           PY
 
+          test -f transcript.srt
+
       - name: Convert to ASS
         run: |
           set -e
@@ -172,12 +187,15 @@ jobs:
           p.write_text("\n".join(out), encoding="utf-8")
           PY
 
+          test -f transcript.ass
+
       - name: Get Duration
         id: duration
         run: |
           set -e
           D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp3)
           echo "duration=$D" >> $GITHUB_OUTPUT
+          echo "Audio duration: $D"
 
       - name: Create Final Video
         run: |
@@ -199,6 +217,9 @@ jobs:
             -shortest \
             final_video.mp4
 
+          test -f final_video.mp4
+          ls -lh final_video.mp4
+
       - name: Verify Outputs
         run: |
           set -e
@@ -211,6 +232,7 @@ jobs:
           test -f final_video.mp4
 
       - name: Upload Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: final-${{ github.event.inputs.job_key }}
@@ -223,3 +245,4 @@ jobs:
             transcript.vtt
             transcript.json
             final_video.mp4
+          if-no-files-found: warn
