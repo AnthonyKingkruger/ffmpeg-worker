@@ -1,26 +1,17 @@
-# ============================================================
-# FILE 3: Dockerfile
-# ============================================================
-
-FROM ubuntu:22.04
+FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PIP_NO_CACHE_DIR=1
-ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    python3 \
-    python3-pip \
     git \
     curl \
-    file \
-    ca-certificates \
-    fonts-dejavu-core \
-    fonts-noto-core \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --upgrade pip setuptools wheel
-RUN pip3 install openai-whisper
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir openai-whisper
 
 WORKDIR /app
+
+CMD ["bash"]
